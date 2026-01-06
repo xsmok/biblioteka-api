@@ -2,7 +2,7 @@
 
 ## Wymagania wstępne
 
-- PHP 8.x
+- PHP 8.4+
 - Composer
 - Symfony CLI
 
