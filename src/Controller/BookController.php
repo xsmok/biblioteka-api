@@ -4,11 +4,15 @@ namespace App\Controller;
 
 use App\Entity\Book;
 use App\Entity\Author;
+use App\DTO\Book\BookRequestDTO;
+use App\DTO\Book\BookResponseDTO;
 use App\Repository\BookRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Serializer\SerializerInterface;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 
 final class BookController extends AbstractController
@@ -29,16 +33,10 @@ final class BookController extends AbstractController
             $books = $bookRepository->findAll();
         }
 
-        $data = array_map(static fn($b) => [
-            'id' => $b->getId(),
-            'title' => $b->getTitle(),
-            'year' => $b->getYear(),
-            'author' => [
-                'id' => $b->getAuthor()->getId(),
-                'first_name' => $b->getAuthor()->getFirstName(),
-                'last_name' => $b->getAuthor()->getLastName(),
-            ],
-        ], $books);
+        $data = array_map(
+            fn($b) => BookResponseDTO::fromEntity($b),
+            $books
+        );
         return $this->json($data);
     }
 
@@ -56,74 +54,48 @@ final class BookController extends AbstractController
             return $this->json(['error' => 'Book not found'], Response::HTTP_NOT_FOUND);
         }
 
-        return $this->json([
-            'id' => $book->getId(),
-            'title' => $book->getTitle(),
-            'year' => $book->getYear(),
-            'author' => [
-                'id' => $book->getAuthor()->getId(),
-                'first_name' => $book->getAuthor()->getFirstName(),
-                'last_name' => $book->getAuthor()->getLastName(),
-            ],
-        ]);
+        return $this->json(BookResponseDTO::fromEntity($book));
     }
 
     #[Route('/books', name: 'api_books_create', methods: ['POST'])]
-    public function create(Request $request, EntityManagerInterface $em): Response
-    {
-        $payload = json_decode($request->getContent(), true);
+    public function create(
+        Request $request,
+        SerializerInterface $serializer,
+        ValidatorInterface $validator,
+        EntityManagerInterface $em
+    ): Response {
+        $dto = $serializer->deserialize(
+            $request->getContent(),
+            BookRequestDTO::class,
+            'json'
+        );
 
-        if (!is_array($payload)) {
-            return $this->json(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        $errors = $validator->validate($dto);
+        if (count($errors) > 0) {
+            return $this->json(['error' => (string)$errors[0]->getMessage()], Response::HTTP_BAD_REQUEST);
         }
 
-        $title = trim((string)($payload['title'] ?? ''));
-        $year = trim((int)($payload['year'] ?? ''));
-        $authorId = trim((int)($payload['authorId'] ?? ''));
-
-        if ($title === '') {
-            return $this->json(['error' => 'Field "title" is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        if ($year === '') {
-            return $this->json(['error' => 'Field "year" is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        if ($authorId === '') {
-            return $this->json(['error' => 'Field "authorId" is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $author = $em->getRepository(Author::class)->find($authorId);
+        $author = $em->getRepository(Author::class)->find($dto->authorId);
         if (!$author) {
             return $this->json(['error' => 'Author not found'], Response::HTTP_BAD_REQUEST);
         }
 
         $book = new Book();
-        $book->setTitle($title);
-        $book->setYear($year);
+        $book->setTitle($dto->title);
+        $book->setYear($dto->year);
         $book->setAuthor($author);
         $em->persist($book);
         $em->flush();
 
-        return $this->json(
-            [
-                'id' => $book->getId(),
-                'title' => $book->getTitle(),
-                'year' => $book->getYear(),
-                'author' => [
-                    'id' => $author->getId(),
-                    'first_name' => $author->getFirstName(),
-                    'last_name' => $author->getLastName(),
-                ],
-            ],
-            Response::HTTP_CREATED
-        );
+        return $this->json(BookResponseDTO::fromEntity($book), Response::HTTP_CREATED);
     }
 
     #[Route('/books/{id}', name: 'api_books_update', methods: ['PUT'])]
     public function update(
         string $id,
         Request $request,
+        SerializerInterface $serializer,
+        ValidatorInterface $validator,
         BookRepository $bookRepository,
         EntityManagerInterface $em
     ): Response {
@@ -138,39 +110,24 @@ final class BookController extends AbstractController
             return $this->json(['error' => 'Book not found'], Response::HTTP_NOT_FOUND);
         }
 
-        $payload = json_decode($request->getContent(), true);
+        $dto = $serializer->deserialize(
+            $request->getContent(),
+            BookRequestDTO::class,
+            'json'
+        );
 
-        if (!is_array($payload)) {
-            return $this->json(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        $errors = $validator->validate($dto);
+        if (count($errors) > 0) {
+            return $this->json(['error' => (string)$errors[0]->getMessage()], Response::HTTP_BAD_REQUEST);
         }
 
-        $title = trim((string)($payload['title'] ?? ''));
-        $year = trim((int)($payload['year'] ?? ''));
-        $authorId = trim((int)($payload['authorId'] ?? ''));
-
-        if ($title === '') {
-            return $this->json(['error' => 'Field "title" is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        if ($year === '') {
-            return $this->json(['error' => 'Field "year" is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        if ($year < 0) {
-            return $this->json(['error' => 'Field "year" must be a positive integer'], Response::HTTP_BAD_REQUEST);
-        }
-
-        if ($authorId === '') {
-            return $this->json(['error' => 'Field "authorId" is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $author = $em->getRepository(Author::class)->find($authorId);
+        $author = $em->getRepository(Author::class)->find($dto->authorId);
         if (!$author) {
             return $this->json(['error' => 'Author not found'], Response::HTTP_BAD_REQUEST);
         }
 
-        $book->setTitle($title);
-        $book->setYear($year);
+        $book->setTitle($dto->title);
+        $book->setYear($dto->year);
         $book->setAuthor($author);
         $em->flush();
 
